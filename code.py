@@ -28,27 +28,77 @@ print("Connected! IP:", wifi.radio.ipv4_address)
 
 # ---------------------------
 # SESSION MANAGEMENT
+# One pool, one session, one SSL context — never recreated
 # ---------------------------
-def make_session():
-    p = socketpool.SocketPool(wifi.radio)
-    r = adafruit_requests.Session(p, ssl.create_default_context())
-    return p, r
+_pool    = socketpool.SocketPool(wifi.radio)
+_ssl_ctx = ssl.create_default_context()
+_session = adafruit_requests.Session(_pool, _ssl_ctx)
 
-pool, requests = make_session()
+def send_to_sheet(energy, temp, humidity, motion,
+                  mind=None, body=None, soul=None):
 
-def reset_network():
-    global pool, requests
-    print("Resetting network...")
+    if not apps_script_url or not logger_key:
+        status_label.text = "Config error"
+        return False
+
+    timestamp = int(time.monotonic())
+
+    payload_dict = {
+        "key":         logger_key,
+        "timestamp":   timestamp,
+        "energy":      energy,
+        "temperature": round(temp, 2),
+        "humidity":    round(humidity, 2),
+        "motion":      motion,
+    }
+
+    if mind is not None and mind > 0:
+        payload_dict["mind"] = mind
+    if body is not None and body > 0:
+        payload_dict["body"] = body
+    if soul is not None and soul > 0:
+        payload_dict["soul"] = soul
+
+    payload = json.dumps(payload_dict)
+    headers = {"Content-Type": "application/json"}
+
+    print("Posting to Apps Script...")
+    print("Payload:", payload)
+
+    response = None
     try:
-        wifi.radio.stop_station()
-    except Exception:
-        pass
-    time.sleep(1)
-    wifi.radio.connect(ssid, password)
-    print("Reconnected:", wifi.radio.ipv4_address)
-    pool, requests = make_session()
-    time.sleep(0.5)
+        response = _session.post(
+            apps_script_url, data=payload, headers=headers)
 
+        # Close immediately — don't read body, don't follow redirect
+        try:
+            response.close()
+        except Exception:
+            pass
+
+        print("POST sent.")
+        status_label.text = "Logged OK"
+        return True
+
+    except Exception as e:
+        print("Send failed:", e)
+        status_label.text = "Send failed"
+
+        # Only reconnect wifi if we actually lost the connection
+        if "wifi" in str(e).lower() or "network" in str(e).lower():
+            print("WiFi issue, reconnecting...")
+            try:
+                wifi.radio.connect(ssid, password)
+                print("Reconnected:", wifi.radio.ipv4_address)
+            except Exception as e2:
+                print("Reconnect failed:", e2)
+
+        return False
+
+    finally:
+        # Small delay to let the TCP connection close gracefully
+        # before the next request — no radio reset needed
+        time.sleep(2)
 # ---------------------------
 # INIT FUNHOUSE
 # ---------------------------
