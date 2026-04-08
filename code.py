@@ -4,25 +4,22 @@ import displayio
 import terminalio
 from adafruit_display_text import label
 from adafruit_funhouse import FunHouse
+from adafruit_io.adafruit_io import IO_HTTP
 import os
 import ssl
 import wifi
 import socketpool
 import adafruit_requests
-import json
-from adafruit_io.adafruit_io import IO_HTTP
 import supervisor
 supervisor.runtime.autoreload = False
 
 # ---------------------------
 # GET CREDENTIALS FROM ENV
 # ---------------------------
-ssid            = os.getenv("CIRCUITPY_WIFI_SSID")
-password        = os.getenv("CIRCUITPY_WIFI_PASSWORD")
-apps_script_url = os.getenv("APPS_SCRIPT_URL")
-logger_key      = os.getenv("LOGGER_SECRET_KEY")
-io_uid          = os.getenv("ADAFRUIT_AIO_USERNAME")
-io_key          = os.getenv("ADAFRUIT_AIO_KEY")
+ssid     = os.getenv("CIRCUITPY_WIFI_SSID")
+password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
+io_uid   = os.getenv("ADAFRUIT_AIO_USERNAME")
+io_key   = os.getenv("ADAFRUIT_AIO_KEY")
 
 # ---------------------------
 # CONNECT WIFI
@@ -31,20 +28,22 @@ print("Connecting to WiFi", ssid)
 wifi.radio.connect(ssid, password)
 print("Connected! IP:", wifi.radio.ipv4_address)
 
-pool = socketpool.SocketPool(wifi.radio)
+pool        = socketpool.SocketPool(wifi.radio)
 ssl_context = ssl.create_default_context()
-requests = adafruit_requests.Session(pool, ssl_context)
-io = IO_HTTP(io_uid, io_key, requests)
+requests    = adafruit_requests.Session(pool, ssl_context)
+io          = IO_HTTP(io_uid, io_key, requests)
 
 # ---------------------------
-# IO Feeds
+# IO FEEDS
 # ---------------------------
-body_feed = io.get_feed("body")
-mind_feed = io.get_feed("mind")
-soul_feed = io.get_feed("soul")
-energy_feed = io.get_feed("energy")
-temp_feed = io.get_feed("temperature")
+print("Loading feeds...")
+energy_feed   = io.get_feed("energy")
+temp_feed     = io.get_feed("temperature")
 humidity_feed = io.get_feed("humidity")
+mind_feed     = io.get_feed("mind")
+body_feed     = io.get_feed("body")
+soul_feed     = io.get_feed("soul")
+print("Feeds loaded.")
 
 # ---------------------------
 # INIT FUNHOUSE
@@ -98,16 +97,15 @@ main_group = displayio.Group()
 display.root_group = main_group
 
 pet_label     = label.Label(terminalio.FONT, text="( -_- )", scale=2, x=60,  y=30,  color=0xFFFFFF)
-energy_label  = label.Label(terminalio.FONT, text="Energy: 0 [----------]", x=10,  y=85,  color=0xFFD700)
-body_label    = label.Label(terminalio.FONT, text="Body: [-----]",  x=10, y=100,  color=0xFF6B6B)
-mind_label    = label.Label(terminalio.FONT, text="Mind: [-----]",  x=10, y=115, color=0x3498DB)
-soul_label    = label.Label(terminalio.FONT, text="Soul: [-----]",  x=10, y=130, color=0x9B59B6)
-message_label = label.Label(terminalio.FONT, text="",               x=10, y=145, color=0xFFFFFF)
-status_label  = label.Label(terminalio.FONT, text="",               x=10, y=170, color=0x888888)
+energy_label  = label.Label(terminalio.FONT, text="Energy: 0 [----------]", x=10, y=85,  color=0xFFD700)
+body_label    = label.Label(terminalio.FONT, text="Body: [-----]",           x=10, y=100, color=0xFF6B6B)
+mind_label    = label.Label(terminalio.FONT, text="Mind: [-----]",           x=10, y=115, color=0x3498DB)
+soul_label    = label.Label(terminalio.FONT, text="Soul: [-----]",           x=10, y=130, color=0x9B59B6)
+message_label = label.Label(terminalio.FONT, text="",                        x=10, y=150, color=0xFFFFFF)
+status_label  = label.Label(terminalio.FONT, text="",                        x=10, y=170, color=0x888888)
 
-for lbl in (pet_label, energy_label,
-            body_label, mind_label, soul_label,
-            message_label, status_label):
+for lbl in (pet_label, energy_label, body_label,
+            mind_label, soul_label, message_label, status_label):
     main_group.append(lbl)
 
 # ---------------------------
@@ -128,7 +126,6 @@ def draw_bar(value):
 def update_ui(energy):
     pet_label.text    = get_pet_face(energy)
     energy_label.text = f"Energy: {energy} {draw_bar(energy)}"
-    # MBS labels only update on touch — not here
 
 # ---------------------------
 # DOTSTAR HELPERS
@@ -141,105 +138,37 @@ def set_dotstars_color(color_tuple):
     funhouse.peripherals.dotstars.show()
 
 # ---------------------------
-# SEND TO APPS SCRIPT
+# SEND TO ADAFRUIT IO
 # ---------------------------
-def send_to_io(energy, temp, humidity, mind=None, body=None, soul=None):
-    try:
-        print(f"Sending {temp} to temperature feed...")
-        io.send_data(temp_feed["key"], temp)
-        print("Data sent!")
-    except Exception as e:
-        print("Failed to send data:", e)
+def send_to_io(energy, temp, humidity,
+               mind=None, body=None, soul=None):
 
-    try:
-        print(f"Sending {energy} to energy feed...")
-        io.send_data(energy_feed["key"], energy)
-        print("Data sent!")
-    except Exception as e:
-        print("Failed to send data:", e)
+    success = True
 
-    try:
-        print(f"Sending {humidity} to humidity feed...")
-        io.send_data(humidity_feed["key"], humidity)
-        print("Data sent!")
-    except Exception as e:
-        print("Failed to send data:", e)
+    feeds = [
+        (temp_feed,     round(temp, 2)),
+        (energy_feed,   energy),
+        (humidity_feed, round(humidity, 2)),
+    ]
 
-    try:
-        print(f"Sending {mind} to mind feed...")
-        io.send_data(mind_feed["key"], mind)
-        print("Data sent!")
-    except Exception as e:
-        print("Failed to send data:", e)
-
-    try:
-        print(f"Sending {body} to body feed...")
-        io.send_data(body_feed["key"], body)
-        print("Data sent!")
-    except Exception as e:
-        print("Failed to send data:", e)
-    try:
-        print(f"Sending {soul} to soul feed...")
-        io.send_data(soul_feed["key"], soul)
-        print("Data sent!")
-    except Exception as e:
-        print("Failed to send data:", e)
-
-def send_to_sheet(energy, temp, humidity, motion,
-                  mind=None, body=None, soul=None):
-
-    if not apps_script_url or not logger_key:
-        message_label.text = "Config error"
-        return False
-
-    timestamp = int(time.monotonic())
-
-    payload_dict = {
-        "key":         logger_key,
-        "timestamp":   timestamp,
-        "energy":      energy,
-        "temperature": round(temp, 2),
-        "humidity":    round(humidity, 2),
-        "motion":      motion,
-    }
-
+    # Only include MBS feeds if value > 0
     if mind is not None and mind > 0:
-        payload_dict["mind"] = mind
+        feeds.append((mind_feed, mind))
     if body is not None and body > 0:
-        payload_dict["body"] = body
+        feeds.append((body_feed, body))
     if soul is not None and soul > 0:
-        payload_dict["soul"] = soul
+        feeds.append((soul_feed, soul))
 
-    payload = json.dumps(payload_dict)
-    headers = {"Content-Type": "application/json"}
-
-    print("Posting to Apps Script...")
-    print("Payload:", payload)
-
-    response = None
-    try:
-        response = _session.post(
-            apps_script_url, data=payload, headers=headers)
+    for feed, value in feeds:
         try:
-            response.close()
-        except Exception:
-            pass
-        response = None
-        print("POST sent.")
-        return True
+            print(f"Sending {value} to {feed['key']}...")
+            io.send_data(feed["key"], value)
+            print("Sent!")
+        except Exception as e:
+            print(f"Failed to send {feed['key']}:", e)
+            success = False
 
-    except Exception as e:
-        print("Send failed:", e)
-        if "wifi" in str(e).lower() or "network" in str(e).lower():
-            try:
-                wifi.radio.connect(ssid, password)
-                print("Reconnected:", wifi.radio.ipv4_address)
-            except Exception as e2:
-                print("Reconnect failed:", e2)
-        return False
-
-    finally:
-        time.sleep(2)
+    return success
 
 # ---------------------------
 # LOGGING FEEDBACK
@@ -253,9 +182,9 @@ def show_log_feedback(success):
         pet_label.text     = "( ^o^ )"
         set_dotstars_color((0, 50, 0))
     else:
-        message_label.text = "Failed!"
+        message_label.text = "Some failed"
         pet_label.text     = "( >_< )"
-        set_dotstars_color((50, 0, 0))
+        set_dotstars_color((50, 25, 0))   # amber — partial send
 
     time.sleep(1.5)
     message_label.text = ""
@@ -278,16 +207,29 @@ def get_energy_from_slider():
     return smoothed
 
 # ---------------------------
-# BUTTON STATE
+# BUTTON & TOUCH STATE
 # ---------------------------
 last_button_sel  = False
 last_button_down = False
 
 TOUCH_MAP = [
-    ("body", (50, 20, 20)),   # dim coral
-    ("mind", (0,  20, 50)),   # dim blue
-    ("soul", (30,  0, 50)),   # dim purple
+    ("body", (50, 20, 20)),
+    ("mind", (0,  20, 50)),
+    ("soul", (30,  0, 50)),
 ]
+
+# ---------------------------
+# WAKE FROM SLEEP HELPER
+# ---------------------------
+def wake_from_sleep():
+    global state
+    state             = STATE_ACTIVE
+    pet_label.text    = get_pet_face(get_energy_from_slider())
+    energy_label.text = f"Energy: {last_energy} {draw_bar(last_energy)}"
+    body_label.text   = f"Body: {draw_mbs_bar(body_val)}"
+    mind_label.text   = f"Mind: {draw_mbs_bar(mind_val)}"
+    soul_label.text   = f"Soul: {draw_mbs_bar(soul_val)}"
+    set_dotstars_color((0, 0, 0))
 
 # ---------------------------
 # MAIN LOOP
@@ -306,7 +248,6 @@ while True:
         funhouse.peripherals.captouch8,   # right = Soul
     ]
 
-    # Check touches regardless of state — so they wake from sleep too
     for i, touched in enumerate(touches):
         if (touched and not last_touch[i]
                 and (now - last_touch_time[i]) > TOUCH_DEBOUNCE):
@@ -314,17 +255,9 @@ while True:
             last_interaction_time = now
             name, dot_color       = TOUCH_MAP[i]
 
-            # Wake from sleep first if needed
             if state == STATE_SLEEP:
-                state             = STATE_ACTIVE
-                pet_label.text    = get_pet_face(energy)
-                energy_label.text = f"Energy: {energy} {draw_bar(energy)}"
-                body_label.text   = f"Body: {draw_mbs_bar(body_val)}"
-                mind_label.text   = f"Mind: {draw_mbs_bar(mind_val)}"
-                soul_label.text   = f"Soul: {draw_mbs_bar(soul_val)}"
-                set_dotstars_color((0, 0, 0))
+                wake_from_sleep()
 
-            # Update the value and label
             if name == "body":
                 body_val           = cycle_value(body_val)
                 body_label.text    = f"Body: {draw_mbs_bar(body_val)}"
@@ -348,14 +281,8 @@ while True:
     if current_sel and not last_button_sel:
         last_interaction_time = now
 
-        # Wake from sleep if needed
         if state == STATE_SLEEP:
-            state             = STATE_ACTIVE
-            energy_label.text = f"Energy: {energy} {draw_bar(energy)}"
-            body_label.text   = f"Body: {draw_mbs_bar(body_val)}"
-            mind_label.text   = f"Mind: {draw_mbs_bar(mind_val)}"
-            soul_label.text   = f"Soul: {draw_mbs_bar(soul_val)}"
-            set_dotstars_color((0, 0, 0))
+            wake_from_sleep()
 
         else:
             time_since_last = now - last_submit_time
@@ -373,16 +300,17 @@ while True:
             else:
                 temp     = funhouse.peripherals.temperature
                 humidity = funhouse.peripherals.relative_humidity
-                motion   = int(funhouse.peripherals.pir_sensor)
 
-                print(f"Energy:{energy} Temp:{temp} Hum:{humidity} Motion:{motion}")
+                print(f"Energy:{energy} Temp:{temp} Hum:{humidity}")
                 print(f"Mind:{mind_val} Body:{body_val} Soul:{soul_val}")
 
+                status_label.text = "Sending..."
                 success = send_to_io(
                     energy, temp, humidity,
                     mind=mind_val, body=body_val, soul=soul_val)
 
                 last_submit_time   = now
+                status_label.text  = ""
                 show_log_feedback(success)
 
                 mind_val           = 0
@@ -397,14 +325,8 @@ while True:
     if current_down and not last_button_down:
         last_interaction_time = now
 
-        # Wake from sleep if needed
         if state == STATE_SLEEP:
-            state             = STATE_ACTIVE
-            energy_label.text = f"Energy: {energy} {draw_bar(energy)}"
-            body_label.text   = f"Body: {draw_mbs_bar(body_val)}"
-            mind_label.text   = f"Mind: {draw_mbs_bar(mind_val)}"
-            soul_label.text   = f"Soul: {draw_mbs_bar(soul_val)}"
-            set_dotstars_color((0, 0, 0))
+            wake_from_sleep()
         else:
             message_label.text = "Mode soon"
             time.sleep(0.5)
@@ -421,11 +343,11 @@ while True:
 
     # --- STATE: SLEEP ---
     elif state == STATE_SLEEP:
-        pet_label.text    = "( -.- ) zZ"
-        energy_label.text = ""
-        body_label.text   = ""
-        mind_label.text   = ""
-        soul_label.text   = ""
+        pet_label.text     = "( -.- ) zZ"
+        energy_label.text  = ""
+        body_label.text    = ""
+        mind_label.text    = ""
+        soul_label.text    = ""
         message_label.text = ""
         set_dotstars_color((0, 0, 10))
 
